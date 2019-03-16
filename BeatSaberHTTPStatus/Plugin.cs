@@ -23,8 +23,8 @@ namespace BeatSaberHTTPStatus {
 		private HTTPServer server;
 
 		private bool headInObstacle = false;
-
-		private StandardLevelSceneSetupDataSO levelSceneSetupData;
+        
+		private BS_Utils.Gameplay.LevelData levelSceneSetupData;
 		private GamePauseManager gamePauseManager;
 		private ScoreController scoreController;
 		private StandardLevelGameplayManager gameplayManager;
