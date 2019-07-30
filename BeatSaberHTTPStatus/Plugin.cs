@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using IllusionPlugin;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -32,6 +33,7 @@ namespace BeatSaberHTTPStatus {
 		private ScoreController scoreController;
 		private StandardLevelGameplayManager gameplayManager;
 		private GameplayModifiersModelSO gameplayModifiersSO;
+		private GameplayModifiers gameplayModifiers;
 		private AudioTimeSyncController audioTimeSyncController;
 		private BeatmapObjectCallbackController beatmapObjectCallbackController;
 		private PlayerHeadAndObstacleInteraction playerHeadAndObstacleInteraction;
@@ -83,7 +85,7 @@ namespace BeatSaberHTTPStatus {
 			}
 
 			if (scoreController != null) {
-				scoreController.noteWasCutEvent += OnNoteWasCut;
+				scoreController.noteWasCutEvent -= OnNoteWasCut;
 				scoreController.noteWasMissedEvent -= OnNoteWasMissed;
 				scoreController.scoreDidChangeEvent -= OnScoreDidChange;
 				scoreController.comboDidChangeEvent -= OnComboDidChange;
@@ -146,7 +148,7 @@ namespace BeatSaberHTTPStatus {
 				scoreController.noteWasCutEvent += OnNoteWasCut;
 				// public ScoreController#noteWasMissedEvent<NoteData, int multiplier>
 				scoreController.noteWasMissedEvent += OnNoteWasMissed;
-				// public ScoreController#scoreDidChangeEvent<int> // score
+				// public ScoreController#scoreDidChangeEvent<int, int> // score
 				scoreController.scoreDidChangeEvent += OnScoreDidChange;
 				// public ScoreController#comboDidChangeEvent<int> // combo
 				scoreController.comboDidChangeEvent += OnComboDidChange;
@@ -165,7 +167,7 @@ namespace BeatSaberHTTPStatus {
 				gameStatus.partyMode = Gamemode.IsPartyActive;
 				gameStatus.mode = Gamemode.GameMode;
 
-				GameplayModifiers gameplayModifiers = gameplayCoreSceneSetupData.gameplayModifiers;
+				gameplayModifiers = gameplayCoreSceneSetupData.gameplayModifiers;
 				PlayerSpecificSettings playerSettings = gameplayCoreSceneSetupData.playerSpecificSettings;
 				PracticeSettings practiceSettings = gameplayCoreSceneSetupData.practiceSettings;
 
@@ -190,12 +192,13 @@ namespace BeatSaberHTTPStatus {
 				gameStatus.bombsCount = diff.beatmapData.bombsCount;
 				gameStatus.obstaclesCount = diff.beatmapData.obstaclesCount;
 				gameStatus.environmentName = level.environmentSceneInfo.sceneName;
-				gameStatus.maxScore = ScoreController.GetScoreForGameplayModifiersScoreMultiplier(ScoreController.MaxScoreForNumberOfNotes(diff.beatmapData.notesCount), modifierMultiplier);
+
+				gameStatus.maxScore = ScoreController.MaxModifiedScoreForMaxRawScore(ScoreController.MaxRawScoreForNumberOfNotes(diff.beatmapData.notesCount), gameplayModifiers, gameplayModifiersSO);
 				gameStatus.maxRank = RankModel.MaxRankForGameplayModifiers(gameplayModifiers, gameplayModifiersSO).ToString();
 
 				try {
 					// From https://support.unity3d.com/hc/en-us/articles/206486626-How-can-I-get-pixels-from-unreadable-textures-
-					var texture = level.coverImage.texture;
+					var texture = level.GetCoverImageTexture2DAsync(CancellationToken.None).Result;
 					var active = RenderTexture.active;
 					var temporary = RenderTexture.GetTemporary(
 						texture.width,
@@ -330,7 +333,7 @@ namespace BeatSaberHTTPStatus {
 			int afterScore = 0;
 			int cutDistanceScore = 0;
 
-			ScoreController.ScoreWithoutMultiplier(noteCutInfo, null, out score, out afterScore, out cutDistanceScore);
+			ScoreController.RawScoreWithoutMultiplier(noteCutInfo, null, out score, out afterScore, out cutDistanceScore);
 
 			gameStatus.initialScore = score;
 			gameStatus.finalScore = -1;
@@ -380,8 +383,8 @@ namespace BeatSaberHTTPStatus {
 
 			SetNoteCutStatus(noteData, noteCutInfo);
 
-			// public ScoreController.ScoreWithoutMultiplier(NoteCutInfo, SaberAfterCutSwingRatingCounter, out int beforeCutScore, out int afterCutScore, out int cutDistanceScore)
-			ScoreController.ScoreWithoutMultiplier(noteCutInfo, null, out score, out afterScore, out cutDistanceScore);
+			// public ScoreController.RawScoreWithoutMultiplier(NoteCutInfo, SaberAfterCutSwingRatingCounter, out int beforeCutScore, out int afterCutScore, out int cutDistanceScore)
+			ScoreController.RawScoreWithoutMultiplier(noteCutInfo, null, out score, out afterScore, out cutDistanceScore);
 
 			int multiplier = (int) afterCutScoreBufferMultiplierField.GetValue(acsb);
 
@@ -443,13 +446,13 @@ namespace BeatSaberHTTPStatus {
 			}
 		}
 
-		public void OnScoreDidChange(int scoreBeforeMultiplier) {
+		public void OnScoreDidChange(int scoreBeforeMultiplier, int scoreAfterMultiplier) {
 			GameStatus gameStatus = statusManager.gameStatus;
 
-			gameStatus.score = ScoreController.GetScoreForGameplayModifiersScoreMultiplier(scoreBeforeMultiplier, gameStatus.modifierMultiplier);
+			gameStatus.score = scoreAfterMultiplier;
 
-			int currentMaxScoreBeforeMultiplier = ScoreController.MaxScoreForNumberOfNotes(gameStatus.passedNotes);
-			gameStatus.currentMaxScore = ScoreController.GetScoreForGameplayModifiersScoreMultiplier(currentMaxScoreBeforeMultiplier, gameStatus.modifierMultiplier);
+			int currentMaxScoreBeforeMultiplier = ScoreController.MaxRawScoreForNumberOfNotes(gameStatus.passedNotes);
+			gameStatus.currentMaxScore = ScoreController.MaxModifiedScoreForMaxRawScore(currentMaxScoreBeforeMultiplier, gameplayModifiers, gameplayModifiersSO);
 
 			RankModel.Rank rank = RankModel.GetRankForScore(scoreBeforeMultiplier, gameStatus.score, currentMaxScoreBeforeMultiplier, gameStatus.currentMaxScore);
 			gameStatus.rank = RankModel.GetRankName(rank);
